@@ -25,35 +25,63 @@ run: npm install
 run: npm test
 -name: Tests passed
 run: echo "All tests passed successfully"
-# Job 2 : Deploy Staging (seulement sur develop)
-deploy-staging:
-name: Deploy Staging
+# Job 3 : Deploy Production (seulement sur main)
+deploy-production:
+name: Deploy Production
 runs-on: ubuntu-latest
 needs: test
-if: github.ref == 'refs/heads/develop' && github.event_name == 'push'
+if: github.ref == 'refs/heads/main' && github.event_name == 'push'
 environment:
-name: staging
-url: https://api-todo-ines-staging.onrender.com
+name: production
+url: https://api-todo-ines-prod.onrender.com
 steps:
--name: Trigger Staging Deploy
+- name: Checkout
+uses: actions/checkout@v4
+with:
+fetch-depth: 0
+- name: Create Version Tag
+id: tag
 run: |
-response=$(curl -X POST ${{ secrets.RENDER_DEPLOY_HOOK_STAGING }} -w
+# Compter les tags existants
+tag_count=$(git tag | grep -c "^v" || echo "0")
+new_version="v1.0.$((tag_count + 1))"
+echo "version=$new_version" >> $GITHUB_OUTPUT
+echo "New version: $new_version"
+- name: Trigger Production Deploy
+run: |
+response=$(curl -X POST ${{ secrets.RENDER_DEPLOY_HOOK_PROD }} -w
 "%{http_code}" -o /dev/null -s)
 if [ $response -eq 200 ] || [ $response -eq 201 ]; then
-echo "Staging deployment triggered successfully"
+echo "Production deployment triggered successfully"
 else
-echo "Staging deployment failed with status $response"
+echo "Production deployment failed with status $response"
 exit 1
 fi
 - name: Wait for deployment
 run: |
 echo "Waiting 60 seconds for deployment to complete..."
 sleep 60
-- name: Health check Staging
+- name: Health check Production
 run: |
-response=$(curl -s -o /dev/null -w "%{http_code}" https://api-todo-ines-staging.onrender.com/health)
+response=$(curl -s -o /dev/null -w "%{http_code}" https://api-todo-ines-
+prod.onrender.com/health)
 if [ $response -eq 200 ]; then
-echo "Staging is healthy"
+echo "Production is healthy"
 else
-echo "Staging health check returned $response"
+echo "Production health check failed with status $response"
+exit 1
 fi
+- name: Push Version Tag
+run: |
+git config user.name "GitHub Actions"
+git config user.email "actions@github.com"
+git tag -a ${{ steps.tag.outputs.version }} -m "Release ${{ steps.tag.outputs.version }}"
+git push origin ${{ steps.tag.outputs.version }}
+env:
+GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+- name: Deployment Complete
+run: |
+echo "Deployment to production complete!"
+echo "Version: ${{ steps.tag.outputs.version }}"
+echo "URL: https://api-todo-ines-prod.onrender.com"
+EOF
